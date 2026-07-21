@@ -27,6 +27,14 @@ Microsoft PowerPoint / Microsoft Officeは本リポジトリおよびNOTE-PONに
 
 PowerPoint for the webには対応していません。
 
+## インストール
+
+[GitHub Releases](https://github.com/pondashicom/note-pon/releases)から`NOTE-PON-Setup-0.1.0.exe`をダウンロードして実行します。
+
+現在のインストーラーにはコード署名がありません。Windowsから発行元を確認できない旨の警告が表示される場合は、ダウンロード元とReleaseに記載されたSHA-256を確認してから実行してください。
+
+インストーラーに.NETランタイムやMicrosoft Office関連DLLは含まれていません。必要環境は別途インストールしてください。
+
 ## ビルド
 
 リポジトリのルートディレクトリで実行します。
@@ -39,6 +47,21 @@ dotnet build .\NotePon.csproj --configuration Release
 
 ```text
 bin\Release\net8.0-windows\NOTE-PON.exe
+```
+
+## インストーラーのビルド
+
+インストーラーの作成には.NET 8 SDKとInno Setup 6が必要です。
+
+```powershell
+winget install --id JRSoftware.InnoSetup --exact
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\installer\build-installer.ps1'
+```
+
+生成先：
+
+```text
+publish\installer\NOTE-PON-Setup-0.1.0.exe
 ```
 
 ## 実行
