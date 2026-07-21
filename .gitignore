@@ -1,0 +1,14 @@
+# Build and publish outputs
+bin/
+obj/
+publish/
+
+# Visual Studio user state
+.vs/
+*.user
+*.suo
+
+# Do not store compiled binaries in this source repository
+*.dll
+*.exe
+*.pdb
