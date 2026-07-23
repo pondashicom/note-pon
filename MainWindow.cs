@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 
 namespace NotePon;
@@ -12,15 +13,20 @@ internal sealed class MainWindow : Window
 {
     private const int HotKeyScrollUpId = 1;
     private const int HotKeyScrollDownId = 2;
+    private const int HotKeyVolumeUpId = 3;
+    private const int HotKeyVolumeDownId = 4;
     private const int WmHotKey = 0x0312;
     private const uint ModAlt = 0x0001;
     private const uint ModControl = 0x0002;
     private const uint VkF10 = 0x79;
     private const uint VkF11 = 0x7A;
+    private const uint VkVolumeDown = 0xAE;
+    private const uint VkVolumeUp = 0xAF;
     private const double MinimumFontSize = 20;
     private const double MaximumFontSize = 96;
     private const double FontSizeStep = 4;
-    private const double ScrollLineCount = 4;
+    private const double StandardScrollLineCount = 4;
+    private const double VolumeScrollLineCount = 1;
     private const double ScrollAnimationMilliseconds = 160;
 
     private static readonly Brush WindowBackground = new SolidColorBrush(Color.FromRgb(0, 0, 0));
@@ -28,7 +34,8 @@ internal sealed class MainWindow : Window
     private static readonly Brush ControlBackground = new SolidColorBrush(Color.FromRgb(50, 50, 50));
     private static readonly Brush ControlBorder = new SolidColorBrush(Color.FromRgb(105, 105, 105));
 
-    private readonly PowerPointReader _powerPointReader = new();
+    private readonly PowerPointWorkerClient _powerPointWorker = new();
+    private readonly CancellationTokenSource _shutdown = new();
     private readonly DispatcherTimer _pollTimer;
     private readonly DispatcherTimer _scrollTimer;
     private readonly TextBlock _statusText;
@@ -39,15 +46,21 @@ internal sealed class MainWindow : Window
     private HwndSource? _windowSource;
     private bool _scrollUpRegistered;
     private bool _scrollDownRegistered;
+    private bool _volumeUpRegistered;
+    private bool _volumeDownRegistered;
     private bool _hotKeyRegistrationFailed;
     private PowerPointState? _lastState;
     private double _scrollStart;
     private double _scrollTarget;
     private long _scrollStartedAt;
+    private bool _pollInProgress;
+    private bool _hasDisplayedNotes;
 
     public MainWindow()
     {
         Title = "NOTE-PON";
+        Icon = BitmapFrame.Create(
+            new Uri("pack://application:,,,/assets/note-pon.ico", UriKind.Absolute));
         Width = 1200;
         Height = 800;
         MinWidth = 640;
@@ -134,7 +147,7 @@ internal sealed class MainWindow : Window
         {
             Interval = TimeSpan.FromMilliseconds(350)
         };
-        _pollTimer.Tick += (_, _) => UpdateFromPowerPoint();
+        _pollTimer.Tick += OnPollTimerTick;
 
         _scrollTimer = new DispatcherTimer(DispatcherPriority.Render)
         {
@@ -163,8 +176,8 @@ internal sealed class MainWindow : Window
         SourceInitialized += OnSourceInitialized;
         Loaded += (_, _) =>
         {
-            UpdateFromPowerPoint();
             _pollTimer.Start();
+            OnPollTimerTick(this, EventArgs.Empty);
         };
         Closed += OnClosed;
     }
@@ -189,7 +202,13 @@ internal sealed class MainWindow : Window
 
         _scrollUpRegistered = RegisterHotKey(handle, HotKeyScrollUpId, ModControl | ModAlt, VkF10);
         _scrollDownRegistered = RegisterHotKey(handle, HotKeyScrollDownId, ModControl | ModAlt, VkF11);
-        _hotKeyRegistrationFailed = !_scrollUpRegistered || !_scrollDownRegistered;
+        _volumeUpRegistered = RegisterHotKey(handle, HotKeyVolumeUpId, 0, VkVolumeUp);
+        _volumeDownRegistered = RegisterHotKey(handle, HotKeyVolumeDownId, 0, VkVolumeDown);
+        _hotKeyRegistrationFailed =
+            !_scrollUpRegistered
+            || !_scrollDownRegistered
+            || !_volumeUpRegistered
+            || !_volumeDownRegistered;
         RefreshStatusText();
     }
 
@@ -203,41 +222,91 @@ internal sealed class MainWindow : Window
         int hotKeyId = wParam.ToInt32();
         if (hotKeyId == HotKeyScrollUpId)
         {
-            BeginSmoothScroll(-1);
+            BeginSmoothScroll(-1, StandardScrollLineCount);
             handled = true;
         }
         else if (hotKeyId == HotKeyScrollDownId)
         {
-            BeginSmoothScroll(1);
+            BeginSmoothScroll(1, StandardScrollLineCount);
+            handled = true;
+        }
+        else if (hotKeyId == HotKeyVolumeUpId)
+        {
+            BeginSmoothScroll(-1, VolumeScrollLineCount);
+            handled = true;
+        }
+        else if (hotKeyId == HotKeyVolumeDownId)
+        {
+            BeginSmoothScroll(1, VolumeScrollLineCount);
             handled = true;
         }
 
         return IntPtr.Zero;
     }
 
-    private void UpdateFromPowerPoint()
+    private async void OnPollTimerTick(object? sender, EventArgs eventArgs)
     {
-        PowerPointSnapshot snapshot = _powerPointReader.Poll();
-        _lastState = snapshot.State;
-        RefreshStatusText(snapshot.StatusText);
-        _slideText.Text = snapshot.SlideNumber.HasValue && snapshot.TotalSlides.HasValue
-            ? $"{snapshot.SlideNumber} / {snapshot.TotalSlides}"
-            : "- / -";
-
-        if (snapshot.NotesChanged)
+        try
         {
-            _notesText.Text = snapshot.Notes ?? string.Empty;
-            ResetScrollToTop();
+            await UpdateFromPowerPointAsync();
+        }
+        catch (OperationCanceledException) when (_shutdown.IsCancellationRequested)
+        {
+            // The window is closing.
+        }
+        catch (Exception exception)
+        {
+            AppLog.Write(
+                "The PowerPoint polling timer failed unexpectedly. NOTE-PON will shut down safely.",
+                exception);
+            Application.Current.Shutdown(1);
+        }
+    }
+
+    private async Task UpdateFromPowerPointAsync()
+    {
+        if (_pollInProgress || _shutdown.IsCancellationRequested)
+        {
             return;
         }
 
-        if (snapshot.State != PowerPointState.Connected && snapshot.State != _lastDisplayedBodyState)
+        _pollInProgress = true;
+        try
         {
-            _notesText.Text = snapshot.StatusText;
-            ResetScrollToTop();
-        }
+            PowerPointSnapshot snapshot = await _powerPointWorker.PollAsync(_shutdown.Token);
+            if (_shutdown.IsCancellationRequested)
+            {
+                return;
+            }
 
-        _lastDisplayedBodyState = snapshot.State;
+            _lastState = snapshot.State;
+            RefreshStatusText(snapshot.StatusText);
+            _slideText.Text = snapshot.SlideNumber.HasValue && snapshot.TotalSlides.HasValue
+                ? $"{snapshot.SlideNumber} / {snapshot.TotalSlides}"
+                : "- / -";
+
+            if (snapshot.NotesChanged)
+            {
+                _notesText.Text = snapshot.Notes ?? string.Empty;
+                _hasDisplayedNotes = true;
+                ResetScrollToTop();
+                return;
+            }
+
+            if (!_hasDisplayedNotes
+                && snapshot.State != PowerPointState.Connected
+                && snapshot.State != _lastDisplayedBodyState)
+            {
+                _notesText.Text = snapshot.StatusText;
+                ResetScrollToTop();
+            }
+
+            _lastDisplayedBodyState = snapshot.State;
+        }
+        finally
+        {
+            _pollInProgress = false;
+        }
     }
 
     private PowerPointState? _lastDisplayedBodyState;
@@ -267,12 +336,12 @@ internal sealed class MainWindow : Window
         _notesText.LineHeight = Math.Round(newSize * 1.34);
     }
 
-    private void BeginSmoothScroll(int direction)
+    private void BeginSmoothScroll(int direction, double lineCount)
     {
         double lineHeight = double.IsNaN(_notesText.LineHeight)
             ? _notesText.FontSize * 1.34
             : _notesText.LineHeight;
-        double amount = lineHeight * ScrollLineCount * direction;
+        double amount = lineHeight * lineCount * direction;
         double currentOffset = _notesScroller.VerticalOffset;
 
         _scrollStart = currentOffset;
@@ -306,8 +375,10 @@ internal sealed class MainWindow : Window
 
     private void OnClosed(object? sender, EventArgs eventArgs)
     {
+        _shutdown.Cancel();
         _pollTimer.Stop();
         _scrollTimer.Stop();
+        _powerPointWorker.Dispose();
 
         IntPtr handle = new WindowInteropHelper(this).Handle;
         if (_scrollUpRegistered)
@@ -318,6 +389,16 @@ internal sealed class MainWindow : Window
         if (_scrollDownRegistered)
         {
             UnregisterHotKey(handle, HotKeyScrollDownId);
+        }
+
+        if (_volumeUpRegistered)
+        {
+            UnregisterHotKey(handle, HotKeyVolumeUpId);
+        }
+
+        if (_volumeDownRegistered)
+        {
+            UnregisterHotKey(handle, HotKeyVolumeDownId);
         }
 
         _windowSource?.RemoveHook(WindowProcedure);

@@ -91,8 +91,12 @@ internal sealed class PowerPointReader
             {
                 notes = ReadSpeakerNotes(slide);
             }
-            catch
+            catch (Exception exception)
             {
+                AppLog.WriteThrottled(
+                    "note-read-error",
+                    "PowerPoint speaker notes could not be read.",
+                    exception);
                 _lastSlideKey = null;
                 return Snapshot(
                     PowerPointState.NoteReadError,
@@ -115,8 +119,12 @@ internal sealed class PowerPointReader
                 NotesChanged: true,
                 Notes: notes);
         }
-        catch
+        catch (Exception exception)
         {
+            AppLog.WriteThrottled(
+                "powerpoint-read-error",
+                "PowerPoint state could not be read.",
+                exception);
             ResetCurrentSlide();
             return _hasConnected
                 ? Snapshot(PowerPointState.Reconnecting, "PowerPointへ再接続しています")

@@ -6,7 +6,7 @@ $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $projectPath = Join-Path $repositoryRoot 'NotePon.csproj'
 $installerScript = Join-Path $PSScriptRoot 'NOTE-PON.iss'
-$outputPath = Join-Path $repositoryRoot 'publish\installer\NOTE-PON-Setup-0.1.0.exe'
+$outputPath = Join-Path $repositoryRoot 'publish\installer\NOTE-PON-Setup-0.2.0.exe'
 
 $compilerCandidates = @(
     (Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 6\ISCC.exe'),
@@ -35,10 +35,10 @@ finally {
 }
 
 $requiredPayload = @(
-    'bin\Release\net8.0-windows\NOTE-PON.exe',
-    'bin\Release\net8.0-windows\NOTE-PON.dll',
-    'bin\Release\net8.0-windows\NOTE-PON.deps.json',
-    'bin\Release\net8.0-windows\NOTE-PON.runtimeconfig.json',
+    'bin\Release\net10.0-windows\NOTE-PON.exe',
+    'bin\Release\net10.0-windows\NOTE-PON.dll',
+    'bin\Release\net10.0-windows\NOTE-PON.deps.json',
+    'bin\Release\net10.0-windows\NOTE-PON.runtimeconfig.json',
     'README.md',
     'LICENSE'
 )
