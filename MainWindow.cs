@@ -16,6 +16,10 @@ internal sealed class MainWindow : Window
     private const int HotKeyVolumeUpId = 3;
     private const int HotKeyVolumeDownId = 4;
     private const int WmHotKey = 0x0312;
+    private const int WmMouseActivate = 0x0021;
+    private const int MaNoActivate = 3;
+    private const int GwlExStyle = -20;
+    private const long WsExNoActivate = 0x08000000L;
     private const uint ModAlt = 0x0001;
     private const uint ModControl = 0x0002;
     private const uint VkF10 = 0x79;
@@ -61,6 +65,8 @@ internal sealed class MainWindow : Window
         Title = "NOTE-PON";
         Icon = BitmapFrame.Create(
             new Uri("pack://application:,,,/assets/note-pon.ico", UriKind.Absolute));
+        ShowActivated = false;
+        Focusable = false;
         Width = 1200;
         Height = 800;
         MinWidth = 640;
@@ -100,6 +106,7 @@ internal sealed class MainWindow : Window
         var topmostCheckBox = new CheckBox
         {
             Content = "常に手前",
+            Focusable = false,
             Foreground = Brushes.White,
             VerticalAlignment = VerticalAlignment.Center,
             Padding = new Thickness(8, 5, 8, 5),
@@ -158,11 +165,13 @@ internal sealed class MainWindow : Window
         _notesScroller = new ScrollViewer
         {
             Content = _notesText,
+            Focusable = false,
+            IsHitTestVisible = false,
             Background = WindowBackground,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Hidden,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
             CanContentScroll = false,
-            PanningMode = PanningMode.VerticalOnly
+            PanningMode = PanningMode.None
         };
         _notesScroller.ScrollChanged += (_, _) =>
         {
@@ -174,6 +183,7 @@ internal sealed class MainWindow : Window
         root.Children.Add(_notesScroller);
 
         SourceInitialized += OnSourceInitialized;
+        PreviewKeyDown += (_, eventArgs) => eventArgs.Handled = true;
         Loaded += (_, _) =>
         {
             _pollTimer.Start();
@@ -189,6 +199,7 @@ internal sealed class MainWindow : Window
             Background = ControlBackground,
             Foreground = Brushes.White,
             BorderBrush = ControlBorder,
+            Focusable = false,
             Padding = new Thickness(10, 5, 10, 5),
             Margin = new Thickness(4, 0, 0, 0),
             VerticalAlignment = VerticalAlignment.Center
@@ -197,6 +208,7 @@ internal sealed class MainWindow : Window
     private void OnSourceInitialized(object? sender, EventArgs eventArgs)
     {
         IntPtr handle = new WindowInteropHelper(this).Handle;
+        MakeWindowNonActivating(handle);
         _windowSource = HwndSource.FromHwnd(handle);
         _windowSource?.AddHook(WindowProcedure);
 
@@ -212,8 +224,30 @@ internal sealed class MainWindow : Window
         RefreshStatusText();
     }
 
+    private static void MakeWindowNonActivating(IntPtr handle)
+    {
+        IntPtr currentStyle = GetWindowLongPtr(handle, GwlExStyle);
+        IntPtr nonActivatingStyle = new(currentStyle.ToInt64() | WsExNoActivate);
+
+        Marshal.SetLastPInvokeError(0);
+        IntPtr previousStyle = SetWindowLongPtr(handle, GwlExStyle, nonActivatingStyle);
+        int error = Marshal.GetLastPInvokeError();
+        if (previousStyle == IntPtr.Zero && error != 0)
+        {
+            AppLog.Write(
+                "The NOTE-PON window could not be marked as non-activating.",
+                new System.ComponentModel.Win32Exception(error));
+        }
+    }
+
     private IntPtr WindowProcedure(IntPtr window, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
+        if (message == WmMouseActivate)
+        {
+            handled = true;
+            return new IntPtr(MaNoActivate);
+        }
+
         if (message != WmHotKey)
         {
             return IntPtr.Zero;
@@ -412,4 +446,11 @@ internal sealed class MainWindow : Window
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool UnregisterHotKey(IntPtr window, int id);
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)]
+    private static extern IntPtr GetWindowLongPtr(IntPtr window, int index);
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
+    private static extern IntPtr SetWindowLongPtr(IntPtr window, int index, IntPtr newValue);
+
 }

@@ -86,6 +86,8 @@ using System;
 using System.Runtime.InteropServices;
 public static class NotePonFaultTestProcessControl
 {
+    private const int GwlExStyle = -20;
+
     [DllImport("user32.dll", SetLastError = true)]
     public static extern bool RegisterHotKey(IntPtr window, int id, uint modifiers, uint virtualKey);
 
@@ -97,6 +99,21 @@ public static class NotePonFaultTestProcessControl
 
     [DllImport("ntdll.dll")]
     public static extern int NtResumeProcess(IntPtr processHandle);
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)]
+    private static extern IntPtr GetWindowLongPtr(IntPtr window, int index);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr SendMessage(
+        IntPtr window,
+        uint message,
+        IntPtr wParam,
+        IntPtr lParam);
+
+    public static long GetExtendedWindowStyle(IntPtr window)
+    {
+        return GetWindowLongPtr(window, GwlExStyle).ToInt64();
+    }
 }
 '@
 }
@@ -110,17 +127,19 @@ if ($existing) {
     throw 'Close the development build of NOTE-PON before running this test.'
 }
 
-$volumeHotKeys = @(
-    @{ Id = 901; VirtualKey = 0xAF },
-    @{ Id = 902; VirtualKey = 0xAE }
+$requestedHotKeys = @(
+    @{ Id = 899; Modifiers = 0x0003; VirtualKey = 0x79 },
+    @{ Id = 900; Modifiers = 0x0003; VirtualKey = 0x7A },
+    @{ Id = 901; Modifiers = 0; VirtualKey = 0xAF },
+    @{ Id = 902; Modifiers = 0; VirtualKey = 0xAE }
 )
-foreach ($hotKey in $volumeHotKeys) {
+foreach ($hotKey in $requestedHotKeys) {
     if (-not [NotePonFaultTestProcessControl]::RegisterHotKey(
         [IntPtr]::Zero,
         $hotKey.Id,
-        0,
+        $hotKey.Modifiers,
         $hotKey.VirtualKey)) {
-        throw 'A volume hotkey is already in use before NOTE-PON starts.'
+        throw 'A requested hotkey is already in use before NOTE-PON starts.'
     }
 
     [void][NotePonFaultTestProcessControl]::UnregisterHotKey(
@@ -145,11 +164,33 @@ try {
         throw 'The NOTE-PON UI process is not responding after startup.'
     }
 
-    foreach ($hotKey in $volumeHotKeys) {
+    $windowDeadline = [DateTime]::UtcNow.AddSeconds(3)
+    while ($primary.MainWindowHandle -eq [IntPtr]::Zero -and
+        [DateTime]::UtcNow -lt $windowDeadline) {
+        Start-Sleep -Milliseconds 100
+        $primary.Refresh()
+    }
+
+    $extendedWindowStyle =
+        [NotePonFaultTestProcessControl]::GetExtendedWindowStyle($primary.MainWindowHandle)
+    if (($extendedWindowStyle -band 0x08000000) -eq 0) {
+        throw 'The NOTE-PON window can still take keyboard focus.'
+    }
+
+    $mouseActivateResult = [NotePonFaultTestProcessControl]::SendMessage(
+        $primary.MainWindowHandle,
+        0x0021,
+        [IntPtr]::Zero,
+        [IntPtr]::Zero)
+    if ($mouseActivateResult.ToInt32() -ne 3) {
+        throw 'The NOTE-PON window did not reject mouse activation.'
+    }
+
+    foreach ($hotKey in $requestedHotKeys) {
         if ([NotePonFaultTestProcessControl]::RegisterHotKey(
             [IntPtr]::Zero,
             $hotKey.Id,
-            0,
+            $hotKey.Modifiers,
             $hotKey.VirtualKey)) {
             [void][NotePonFaultTestProcessControl]::UnregisterHotKey(
                 [IntPtr]::Zero,
@@ -203,6 +244,9 @@ try {
         DuplicateInstancePrevented = $true
         UiRemainedResponsive = $true
         VolumeHotKeysRegistered = $true
+        ShortcutHotKeysRegistered = $true
+        WindowDoesNotActivate = $true
+        MouseClickDoesNotActivate = $true
         WorkerRecoveryMilliseconds = $recoveryStopwatch.ElapsedMilliseconds
     }
 }
