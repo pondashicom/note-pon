@@ -1,5 +1,5 @@
 #define MyAppName "NOTE-PON"
-#define MyAppVersion "0.2.2"
+#define MyAppVersion "0.2.3"
 #define MyAppPublisher "Tetsu Suzuki"
 #define MyAppURL "https://github.com/pondashicom/note-pon"
 #define MyAppExeName "NOTE-PON.exe"
@@ -31,7 +31,7 @@ CloseApplications=yes
 CloseApplicationsFilter={#MyAppExeName}
 RestartApplications=no
 UninstallDisplayIcon={app}\{#MyAppExeName}
-VersionInfoVersion=0.2.2.0
+VersionInfoVersion=0.2.3.0
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription=NOTE-PON Installer
 VersionInfoProductName={#MyAppName}

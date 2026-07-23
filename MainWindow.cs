@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -47,7 +48,7 @@ internal sealed class MainWindow : Window
     private readonly DispatcherTimer _scrollTimer;
     private readonly TextBlock _statusText;
     private readonly TextBlock _slideText;
-    private readonly TextBlock _notesText;
+    private readonly StackPanel _notesPanel;
     private readonly ScrollViewer _notesScroller;
     private readonly TextBlock _moreIndicator;
 
@@ -64,6 +65,9 @@ internal sealed class MainWindow : Window
     private long _scrollStartedAt;
     private bool _pollInProgress;
     private bool _hasDisplayedNotes;
+    private double _noteFontSize = 44;
+    private string _displayedBodyText = "PowerPointを待っています";
+    private FormattedNoteDocument? _displayedFormattedNotes;
 
     public MainWindow()
     {
@@ -144,14 +148,8 @@ internal sealed class MainWindow : Window
         };
         statusBar.Children.Add(_statusText);
 
-        _notesText = new TextBlock
+        _notesPanel = new StackPanel
         {
-            Text = "PowerPointを待っています",
-            FontSize = 44,
-            LineHeight = 59,
-            LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
-            Foreground = Brushes.White,
-            TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(32, 24, 32, 40)
         };
 
@@ -169,7 +167,7 @@ internal sealed class MainWindow : Window
 
         _notesScroller = new ScrollViewer
         {
-            Content = _notesText,
+            Content = _notesPanel,
             Focusable = false,
             IsHitTestVisible = false,
             Background = WindowBackground,
@@ -178,6 +176,7 @@ internal sealed class MainWindow : Window
             CanContentScroll = false,
             PanningMode = PanningMode.None
         };
+        RenderCurrentBody();
 
         _moreIndicator = new TextBlock
         {
@@ -354,7 +353,7 @@ internal sealed class MainWindow : Window
 
             if (snapshot.NotesChanged)
             {
-                _notesText.Text = snapshot.Notes ?? string.Empty;
+                SetDisplayedBody(snapshot.Notes ?? string.Empty, snapshot.FormattedNotes);
                 _hasDisplayedNotes = true;
                 ResetScrollToTop();
                 return;
@@ -364,7 +363,7 @@ internal sealed class MainWindow : Window
                 && snapshot.State != PowerPointState.Connected
                 && snapshot.State != _lastDisplayedBodyState)
             {
-                _notesText.Text = snapshot.StatusText;
+                SetDisplayedBody(snapshot.StatusText, null);
                 ResetScrollToTop();
             }
 
@@ -398,22 +397,197 @@ internal sealed class MainWindow : Window
 
     private void ChangeFontSize(double delta)
     {
-        double newSize = Math.Clamp(_notesText.FontSize + delta, MinimumFontSize, MaximumFontSize);
-        _notesText.FontSize = newSize;
-        _notesText.LineHeight = Math.Round(newSize * 1.34);
+        double currentOffset = _notesScroller.VerticalOffset;
+        _noteFontSize = Math.Clamp(_noteFontSize + delta, MinimumFontSize, MaximumFontSize);
+        RenderCurrentBody();
+
+        Dispatcher.BeginInvoke(
+            DispatcherPriority.Loaded,
+            () =>
+            {
+                double restoredOffset = Math.Clamp(currentOffset, 0, _notesScroller.ScrollableHeight);
+                _notesScroller.ScrollToVerticalOffset(restoredOffset);
+                _scrollTarget = restoredOffset;
+                UpdateMoreIndicator();
+            });
     }
 
     private void BeginSmoothScroll(int direction, double lineCount)
     {
-        BeginSmoothScrollBy(_notesText.LineHeight * lineCount * direction);
+        BeginSmoothScrollBy(CurrentLineHeight * lineCount * direction);
     }
 
     private void BeginPageScroll()
     {
         double pageHeight = Math.Max(
-            _notesText.LineHeight,
-            _notesScroller.ViewportHeight - _notesText.LineHeight);
+            CurrentLineHeight,
+            _notesScroller.ViewportHeight - CurrentLineHeight);
         BeginSmoothScrollBy(pageHeight);
+    }
+
+    private double CurrentLineHeight => Math.Round(_noteFontSize * 1.34);
+
+    private void SetDisplayedBody(string text, FormattedNoteDocument? formattedNotes)
+    {
+        _displayedBodyText = text;
+        _displayedFormattedNotes = formattedNotes;
+        RenderCurrentBody();
+    }
+
+    private void RenderCurrentBody()
+    {
+        _notesPanel.Children.Clear();
+
+        if (_displayedFormattedNotes?.Paragraphs is { Length: > 0 } paragraphs)
+        {
+            foreach (FormattedNoteParagraph paragraph in paragraphs)
+            {
+                _notesPanel.Children.Add(CreateFormattedParagraph(paragraph));
+            }
+
+            return;
+        }
+
+        var plainText = CreateNoteTextBlock(NoteTextAlignment.Left);
+        plainText.Text = _displayedBodyText;
+        _notesPanel.Children.Add(plainText);
+    }
+
+    private FrameworkElement CreateFormattedParagraph(FormattedNoteParagraph paragraph)
+    {
+        var paragraphText = CreateNoteTextBlock(paragraph.Alignment);
+        foreach (FormattedNoteRun formattedRun in paragraph.Runs)
+        {
+            paragraphText.Inlines.Add(CreateFormattedRun(formattedRun));
+        }
+
+        if (paragraph.Runs.Length == 0)
+        {
+            paragraphText.Inlines.Add(new Run("\u00A0"));
+        }
+
+        double indent = Math.Max(0, paragraph.IndentLevel - 1) * _noteFontSize * 0.75;
+        if (string.IsNullOrEmpty(paragraph.BulletText))
+        {
+            paragraphText.Margin = new Thickness(indent, 0, 0, 0);
+            return paragraphText;
+        }
+
+        var bulletText = CreateNoteTextBlock(NoteTextAlignment.Left);
+        bulletText.Text = paragraph.BulletText;
+        bulletText.Margin = new Thickness(0, 0, _noteFontSize * 0.3, 0);
+
+        var bulletRow = new Grid
+        {
+            Margin = new Thickness(indent, 0, 0, 0)
+        };
+        bulletRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        bulletRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        Grid.SetColumn(bulletText, 0);
+        Grid.SetColumn(paragraphText, 1);
+        bulletRow.Children.Add(bulletText);
+        bulletRow.Children.Add(paragraphText);
+        return bulletRow;
+    }
+
+    private TextBlock CreateNoteTextBlock(NoteTextAlignment alignment) =>
+        new()
+        {
+            FontSize = _noteFontSize,
+            LineHeight = CurrentLineHeight,
+            LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
+            Foreground = Brushes.White,
+            TextWrapping = TextWrapping.Wrap,
+            TextAlignment = alignment switch
+            {
+                NoteTextAlignment.Center => TextAlignment.Center,
+                NoteTextAlignment.Right => TextAlignment.Right,
+                NoteTextAlignment.Justify => TextAlignment.Justify,
+                _ => TextAlignment.Left
+            },
+            MinHeight = CurrentLineHeight
+        };
+
+    private Run CreateFormattedRun(FormattedNoteRun formattedRun)
+    {
+        var run = new Run(formattedRun.Text)
+        {
+            FontWeight = formattedRun.Bold ? FontWeights.Bold : FontWeights.Normal,
+            FontStyle = formattedRun.Italic ? FontStyles.Italic : FontStyles.Normal,
+            Foreground = CreateReadableForeground(formattedRun.RgbColor)
+        };
+
+        if (formattedRun.Underline)
+        {
+            run.TextDecorations = TextDecorations.Underline;
+        }
+
+        if (formattedRun.Superscript)
+        {
+            run.BaselineAlignment = BaselineAlignment.Superscript;
+            run.FontSize = _noteFontSize * 0.72;
+        }
+        else if (formattedRun.Subscript)
+        {
+            run.BaselineAlignment = BaselineAlignment.Subscript;
+            run.FontSize = _noteFontSize * 0.72;
+        }
+
+        return run;
+    }
+
+    private static Brush CreateReadableForeground(int? colorRef)
+    {
+        if (!colorRef.HasValue)
+        {
+            return Brushes.White;
+        }
+
+        int rgb = colorRef.Value;
+        byte red = (byte)(rgb & 0xFF);
+        byte green = (byte)((rgb >> 8) & 0xFF);
+        byte blue = (byte)((rgb >> 16) & 0xFF);
+
+        if (red == 0 && green == 0 && blue == 0)
+        {
+            return Brushes.White;
+        }
+
+        for (int step = 0; step <= 100; step++)
+        {
+            double blend = step / 100d;
+            byte candidateRed = BlendTowardWhite(red, blend);
+            byte candidateGreen = BlendTowardWhite(green, blend);
+            byte candidateBlue = BlendTowardWhite(blue, blend);
+            if (ContrastAgainstBlack(candidateRed, candidateGreen, candidateBlue) >= 4.5)
+            {
+                var brush = new SolidColorBrush(
+                    Color.FromRgb(candidateRed, candidateGreen, candidateBlue));
+                brush.Freeze();
+                return brush;
+            }
+        }
+
+        return Brushes.White;
+    }
+
+    private static byte BlendTowardWhite(byte component, double blend) =>
+        (byte)Math.Round(component + ((255 - component) * blend));
+
+    private static double ContrastAgainstBlack(byte red, byte green, byte blue) =>
+        (RelativeLuminance(red, green, blue) + 0.05) / 0.05;
+
+    private static double RelativeLuminance(byte red, byte green, byte blue) =>
+        (0.2126 * LinearizeColor(red))
+        + (0.7152 * LinearizeColor(green))
+        + (0.0722 * LinearizeColor(blue));
+
+    private static double LinearizeColor(byte component)
+    {
+        double channel = component / 255d;
+        return channel <= 0.04045
+            ? channel / 12.92
+            : Math.Pow((channel + 0.055) / 1.055, 2.4);
     }
 
     private void BeginSmoothScrollBy(double amount)
