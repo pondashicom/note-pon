@@ -15,6 +15,7 @@ internal sealed class MainWindow : Window
     private const int HotKeyScrollDownId = 2;
     private const int HotKeyVolumeUpId = 3;
     private const int HotKeyVolumeDownId = 4;
+    private const int HotKeyVolumeMuteId = 5;
     private const int WmHotKey = 0x0312;
     private const int WmMouseActivate = 0x0021;
     private const int MaNoActivate = 3;
@@ -22,8 +23,10 @@ internal sealed class MainWindow : Window
     private const long WsExNoActivate = 0x08000000L;
     private const uint ModAlt = 0x0001;
     private const uint ModControl = 0x0002;
+    private const uint ModNoRepeat = 0x4000;
     private const uint VkF10 = 0x79;
     private const uint VkF11 = 0x7A;
+    private const uint VkVolumeMute = 0xAD;
     private const uint VkVolumeDown = 0xAE;
     private const uint VkVolumeUp = 0xAF;
     private const double MinimumFontSize = 20;
@@ -46,12 +49,14 @@ internal sealed class MainWindow : Window
     private readonly TextBlock _slideText;
     private readonly TextBlock _notesText;
     private readonly ScrollViewer _notesScroller;
+    private readonly TextBlock _moreIndicator;
 
     private HwndSource? _windowSource;
     private bool _scrollUpRegistered;
     private bool _scrollDownRegistered;
     private bool _volumeUpRegistered;
     private bool _volumeDownRegistered;
+    private bool _volumeMuteRegistered;
     private bool _hotKeyRegistrationFailed;
     private PowerPointState? _lastState;
     private double _scrollStart;
@@ -173,14 +178,35 @@ internal sealed class MainWindow : Window
             CanContentScroll = false,
             PanningMode = PanningMode.None
         };
+
+        _moreIndicator = new TextBlock
+        {
+            Text = "▼",
+            FontFamily = new FontFamily("Segoe UI Symbol"),
+            FontSize = 30,
+            Foreground = Brushes.White,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Bottom,
+            Margin = new Thickness(0, 0, 0, 4),
+            IsHitTestVisible = false,
+            Focusable = false,
+            Visibility = Visibility.Collapsed
+        };
+
         _notesScroller.ScrollChanged += (_, _) =>
         {
             if (!_scrollTimer.IsEnabled)
             {
                 _scrollTarget = _notesScroller.VerticalOffset;
             }
+
+            UpdateMoreIndicator();
         };
-        root.Children.Add(_notesScroller);
+
+        var notesLayer = new Grid();
+        notesLayer.Children.Add(_notesScroller);
+        notesLayer.Children.Add(_moreIndicator);
+        root.Children.Add(notesLayer);
 
         SourceInitialized += OnSourceInitialized;
         PreviewKeyDown += (_, eventArgs) => eventArgs.Handled = true;
@@ -216,11 +242,13 @@ internal sealed class MainWindow : Window
         _scrollDownRegistered = RegisterHotKey(handle, HotKeyScrollDownId, ModControl | ModAlt, VkF11);
         _volumeUpRegistered = RegisterHotKey(handle, HotKeyVolumeUpId, 0, VkVolumeUp);
         _volumeDownRegistered = RegisterHotKey(handle, HotKeyVolumeDownId, 0, VkVolumeDown);
+        _volumeMuteRegistered = RegisterHotKey(handle, HotKeyVolumeMuteId, ModNoRepeat, VkVolumeMute);
         _hotKeyRegistrationFailed =
             !_scrollUpRegistered
             || !_scrollDownRegistered
             || !_volumeUpRegistered
-            || !_volumeDownRegistered;
+            || !_volumeDownRegistered
+            || !_volumeMuteRegistered;
         RefreshStatusText();
     }
 
@@ -272,6 +300,11 @@ internal sealed class MainWindow : Window
         else if (hotKeyId == HotKeyVolumeDownId)
         {
             BeginSmoothScroll(1, VolumeScrollLineCount);
+            handled = true;
+        }
+        else if (hotKeyId == HotKeyVolumeMuteId)
+        {
+            BeginPageScroll();
             handled = true;
         }
 
@@ -372,10 +405,19 @@ internal sealed class MainWindow : Window
 
     private void BeginSmoothScroll(int direction, double lineCount)
     {
-        double lineHeight = double.IsNaN(_notesText.LineHeight)
-            ? _notesText.FontSize * 1.34
-            : _notesText.LineHeight;
-        double amount = lineHeight * lineCount * direction;
+        BeginSmoothScrollBy(_notesText.LineHeight * lineCount * direction);
+    }
+
+    private void BeginPageScroll()
+    {
+        double pageHeight = Math.Max(
+            _notesText.LineHeight,
+            _notesScroller.ViewportHeight - _notesText.LineHeight);
+        BeginSmoothScrollBy(pageHeight);
+    }
+
+    private void BeginSmoothScrollBy(double amount)
+    {
         double currentOffset = _notesScroller.VerticalOffset;
 
         _scrollStart = currentOffset;
@@ -397,6 +439,14 @@ internal sealed class MainWindow : Window
             _notesScroller.ScrollToVerticalOffset(_scrollTarget);
             _scrollTimer.Stop();
         }
+    }
+
+    private void UpdateMoreIndicator()
+    {
+        bool hasMore =
+            _notesScroller.ScrollableHeight > 0 &&
+            _notesScroller.VerticalOffset < _notesScroller.ScrollableHeight - 0.5;
+        _moreIndicator.Visibility = hasMore ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void ResetScrollToTop()
@@ -433,6 +483,11 @@ internal sealed class MainWindow : Window
         if (_volumeDownRegistered)
         {
             UnregisterHotKey(handle, HotKeyVolumeDownId);
+        }
+
+        if (_volumeMuteRegistered)
+        {
+            UnregisterHotKey(handle, HotKeyVolumeMuteId);
         }
 
         _windowSource?.RemoveHook(WindowProcedure);

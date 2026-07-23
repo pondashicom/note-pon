@@ -131,7 +131,8 @@ $requestedHotKeys = @(
     @{ Id = 899; Modifiers = 0x0003; VirtualKey = 0x79 },
     @{ Id = 900; Modifiers = 0x0003; VirtualKey = 0x7A },
     @{ Id = 901; Modifiers = 0; VirtualKey = 0xAF },
-    @{ Id = 902; Modifiers = 0; VirtualKey = 0xAE }
+    @{ Id = 902; Modifiers = 0; VirtualKey = 0xAE },
+    @{ Id = 903; Modifiers = 0x4000; VirtualKey = 0xAD }
 )
 foreach ($hotKey in $requestedHotKeys) {
     if (-not [NotePonFaultTestProcessControl]::RegisterHotKey(
@@ -195,7 +196,7 @@ try {
             [void][NotePonFaultTestProcessControl]::UnregisterHotKey(
                 [IntPtr]::Zero,
                 $hotKey.Id)
-            throw 'NOTE-PON did not register a requested volume hotkey.'
+            throw 'NOTE-PON did not register a requested hotkey.'
         }
     }
 
@@ -244,6 +245,7 @@ try {
         DuplicateInstancePrevented = $true
         UiRemainedResponsive = $true
         VolumeHotKeysRegistered = $true
+        MutePageHotKeyRegistered = $true
         ShortcutHotKeysRegistered = $true
         WindowDoesNotActivate = $true
         MouseClickDoesNotActivate = $true
