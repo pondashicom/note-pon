@@ -6,7 +6,7 @@ $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $projectPath = Join-Path $repositoryRoot 'NotePon.csproj'
 $installerScript = Join-Path $PSScriptRoot 'NOTE-PON.iss'
-$outputPath = Join-Path $repositoryRoot 'publish\installer\NOTE-PON-Setup-0.2.0.exe'
+$outputPath = Join-Path $repositoryRoot 'publish\installer\NOTE-PON-Setup-0.2.1.exe'
 
 $compilerCandidates = @(
     (Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 6\ISCC.exe'),

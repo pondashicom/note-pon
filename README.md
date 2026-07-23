@@ -20,6 +20,19 @@ NOTE-PONは、Windowsデスクトップ版Microsoft PowerPointで実行中のス
 - 文字サイズ変更、常に手前表示
 - PowerPoint終了後の待機と、再起動後の自動再接続
 
+## 入力仕様
+
+NOTE-PONのノートをスクロールする入力は、次の4つだけです。
+
+- `Ctrl + Alt + F10`：約4行上へスクロール
+- `Ctrl + Alt + F11`：約4行下へスクロール
+- 音量アップキー：1行上へスクロール
+- 音量ダウンキー：1行下へスクロール
+
+上下矢印キーを含む通常のキーボード入力では、NOTE-PONのノートはスクロールしません。NOTE-PONのウィンドウや操作ボタンをクリックしてもキーボードフォーカスを取得しないため、PowerPointを前面にしたまま使用できます。
+
+マウスホイール、スクロールバー、タッチ操作もNOTE-PONのノートスクロールには使用しません。現在の最小実装では、NOTE-PON上で受けたマウスホイール入力をPowerPointへ転送しないため、マウスポインターがNOTE-PON上にある間はPowerPointもホイールに反応しない場合があります。
+
 ## 必要環境
 
 - Windows 11 バージョン24H2（ビルド26100）以降
@@ -41,7 +54,7 @@ PowerPoint for the webには対応していません。
 
 ## インストール
 
-[GitHub Releases](https://github.com/pondashicom/note-pon/releases)から`NOTE-PON-Setup-0.2.0.exe`をダウンロードして実行します。
+[GitHub Releases](https://github.com/pondashicom/note-pon/releases)から`NOTE-PON-Setup-0.2.1.exe`をダウンロードして実行します。
 
 現在のインストーラーにはコード署名がありません。Windowsから発行元を確認できない旨の警告が表示される場合は、ダウンロード元とReleaseに記載されたSHA-256を確認してから実行してください。
 
@@ -73,7 +86,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\installer\build-insta
 生成先：
 
 ```text
-publish\installer\NOTE-PON-Setup-0.2.0.exe
+publish\installer\NOTE-PON-Setup-0.2.1.exe
 ```
 
 ## 障害耐性テスト
@@ -83,6 +96,17 @@ PowerPoint監視プロセスを意図的に停止し、2秒後の自動再起動
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\scripts\test-fault-tolerance.ps1'
 ```
+
+## 手動テスト
+
+1. 長いスピーカーノートが入ったPowerPointを開き、スライドショーを開始します。
+2. NOTE-PONを起動し、現在のスライドに対応するノートが表示されることを確認します。
+3. 音量アップ／ダウンキーで、ノートが1行ずつ上下へ滑らかにスクロールすることを確認します。
+4. `Ctrl + Alt + F10`／`F11`で、ノートが約4行ずつ上下へスクロールすることを確認します。
+5. NOTE-PONをクリックしてから上下矢印キーを押し、NOTE-PONのノートがスクロールしないことを確認します。
+6. NOTE-PON上でマウスホイールを回し、NOTE-PONのノートがスクロールしないことを確認します。
+7. `A−`、`A＋`、「常に手前」が操作できることを確認します。
+8. NOTE-PONを終了し、音量アップ／ダウンキーがWindowsの音量操作へ戻ることを確認します。
 
 ## 実行
 
